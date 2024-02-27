@@ -1,0 +1,43 @@
+#CTE creation
+WITH weather_anomalies AS (
+  #Calculate weather anomalies for Polish stations in the year 2000
+  SELECT
+    gsod.stn AS station_number,
+    stations.name AS station_name,
+    gsod.year AS year,
+    gsod.mo AS month,
+    gsod.da AS day,
+    gsod.temp AS temperature,
+    gsod.prcp AS precipitation,
+    #Previous day without precipitation
+    LAG(gsod.prcp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da) AS previous_precipitation,
+    #Average precipitation over the past week 
+    AVG(gsod.prcp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS avg_weekly_precipitation,
+    #Average temperature over the past 4 days
+    AVG(gsod.temp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS previous_avg_temperature
+  FROM
+    `bigquery-public-data.noaa_gsod.gsod2000` AS gsod
+  JOIN
+    `bigquery-public-data.noaa_gsod.stations` AS stations
+  ON
+    gsod.stn = stations.usaf
+    AND gsod.wban = stations.wban
+  WHERE
+    stations.country = 'PL' #Filter for Polish stations
+)
+SELECT
+  station_number,
+  station_name,
+  COUNT(*) AS anomalies_count
+FROM
+  weather_anomalies
+WHERE
+  previous_precipitation = 0     #Previous day without precipitation
+  AND precipitation > avg_weekly_precipitation     #Average precipitation over the past week 
+  AND temperature < previous_avg_temperature - 5 #Average temperature over the past 4 days
+GROUP BY
+  station_number,
+  station_name
+ORDER BY
+  anomalies_count DESC
+LIMIT 1;
