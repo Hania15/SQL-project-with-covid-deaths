@@ -1,19 +1,20 @@
-#CTE creation
-WITH weather_anomalies AS (
-  #Calculate weather anomalies for Polish stations in the year 2000
+WITH weather_breakages AS (
   SELECT
-    gsod.stn AS station_number,
     stations.name AS station_name,
+    gsod.stn AS station_number,
     gsod.year AS year,
     gsod.mo AS month,
     gsod.da AS day,
     gsod.temp AS temperature,
-    gsod.prcp AS precipitation,
-    #Previous day without precipitation
+    CASE 
+      WHEN gsod.prcp = 99 THEN NULL 
+      ELSE gsod.prcp 
+    END AS precipitation,
     LAG(gsod.prcp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da) AS previous_precipitation,
-    #Average precipitation over the past week 
-    AVG(gsod.prcp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS avg_weekly_precipitation,
-    #Average temperature over the past 4 days
+    AVG(CASE 
+          WHEN gsod.prcp = 99 THEN NULL 
+          ELSE gsod.prcp 
+        END) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS avg_weekly_precipitation,
     AVG(gsod.temp) OVER (PARTITION BY gsod.stn ORDER BY gsod.year, gsod.mo, gsod.da ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) AS previous_avg_temperature
   FROM
     `bigquery-public-data.noaa_gsod.gsod2000` AS gsod
@@ -23,21 +24,31 @@ WITH weather_anomalies AS (
     gsod.stn = stations.usaf
     AND gsod.wban = stations.wban
   WHERE
-    stations.country = 'PL' #Filter for Polish stations
+    stations.country = 'PL'
 )
 SELECT
-  station_number,
   station_name,
-  COUNT(*) AS anomalies_count
-FROM
-  weather_anomalies
-WHERE
-  previous_precipitation = 0     #Previous day without precipitation
-  AND precipitation > avg_weekly_precipitation     #Average precipitation over the past week 
-  AND temperature < previous_avg_temperature - 5 #Average temperature over the past 4 days
-GROUP BY
   station_number,
-  station_name
+  year,
+  month,
+  day,
+  temperature,
+  precipitation
+FROM
+  weather_breakages
+WHERE
+  previous_precipitation = 0
+  AND (precipitation IS NULL OR precipitation > avg_weekly_precipitation)
+  AND temperature < previous_avg_temperature - 5
+GROUP BY
+  station_name,
+  station_number,
+  year,
+  month,
+  day,
+  temperature,
+  precipitation
 ORDER BY
-  anomalies_count DESC
-LIMIT 1;
+  station_name DESC,
+  station_number DESC
+LIMIT 10;
